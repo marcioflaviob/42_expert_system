@@ -15,7 +15,6 @@ class Rule:
 @dataclass
 class ParsedData:
     letters_by_char: Dict[str, Letter]
-    letters_in_order: List[Letter]
     rules: List[Rule]
 
 @dataclass
@@ -32,7 +31,6 @@ class Letter:
         if letter is None:
             letter = Letter(char=char, value=False, queried=False)
             parsed.letters_by_char[char] = letter
-            parsed.letters_in_order.append(letter)
 
     @classmethod
     def get(cls, char: str, parsed: ParsedData) -> Letter:
@@ -78,7 +76,7 @@ def tokenize_expression(line: str, parsed: ParsedData) -> List[str]:
     return tokens
 
 def read_file(file_path: Path) -> ParsedData:
-    parsed = ParsedData(letters_by_char={}, letters_in_order=[], rules=[])
+    parsed = ParsedData(letters_by_char={}, rules=[])
     for raw_line in file_path.read_text(encoding="utf-8").splitlines():
         line = remove_comment(raw_line)
         line = remove_whitespace(line)
