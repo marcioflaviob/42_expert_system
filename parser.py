@@ -35,7 +35,7 @@ class Letter:
             raise ValueError(f"Invalid letter: {char}")
         letter = parsed.letters_by_char.get(char)
         if letter is None:
-            letter = Letter(char=char, value=False, queried=False)
+            letter = Letter(char=char, value=None, queried=False)
             parsed.letters_by_char[char] = letter
 
     @classmethod

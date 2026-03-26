@@ -11,8 +11,8 @@ def main() -> None:
 	args = parser.parse_args()
 
 	parsed = read_file(Path(args.input_file))
-	print(json.dumps(asdict(parsed), indent=2, sort_keys=True))
-	# print(solve(parsed))
+	# print(json.dumps(asdict(parsed), indent=2, sort_keys=True))
+	solve(parsed)
 
 
 if __name__ == "__main__":
