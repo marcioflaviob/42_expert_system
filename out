@@ -1,0 +1,30 @@
+{
+  "letters_by_char": {
+    "A": {
+      "char": "A",
+      "queried": false,
+      "value": true
+    },
+    "B": {
+      "char": "B",
+      "queried": true,
+      "value": false
+    },
+    "C": {
+      "char": "C",
+      "queried": true,
+      "value": false
+    }
+  },
+  "rules": [
+    {
+      "left": ["A"],
+      "right": ["B"]
+    },
+    {
+      "left": ["A", "^", "B"],
+      "right": ["C"]
+    }
+  ]
+}
+
