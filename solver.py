@@ -50,11 +50,22 @@ def solve(parsed: ParsedData) -> Dict[str, Truth]:
         if rule.left.value is not None:
             continue
         result = solve_side(parsed, rule.left)
+        rule.right.value = result
+        rule.right.checked = True
+        
+        if (len(rule.right.expression) == 1 and rule.right.expression[0].isupper()):
+            letter = Letter.set(rule.right.expression[0], value=result, parsed=parsed)
+            print(f"Set {letter.char} to {letter.value} based on rule: {rule.left.expression} => {rule.right.expression}")
+        elif (len(rule.right.expression) == 1 and not rule.right.expression[0].isupper()):
+            raise ValueError(f"Invalid right side expression: {rule.right.expression}")
         if result is not None:
             rule.left.value = result
             rule.left.checked = True
     
-    for rule in parsed.rules:
-        print(f"{rule.left.expression} = {rule.left.value} (checked: {rule.left.checked}) => {rule.right.expression} = {rule.right.value} (checked: {rule.right.checked})")
-    
+    # for rule in parsed.rules:
+    #     print(f"{rule.left.expression} = {rule.left.value} (checked: {rule.left.checked}) => {rule.right.expression} = {rule.right.value} (checked: {rule.right.checked})")
+
+    print("Final letter values:")
+    for char, letter in parsed.letters_by_char.items():
+        print(f"{char}: {letter.value}")
     return {}
