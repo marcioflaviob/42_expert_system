@@ -63,7 +63,7 @@ def remove_whitespace(line: str) -> str:
     return line.replace(" ", "")
 
 def has_bad_parenthesis(tokens: List[str]) -> bool:
-    if tokens.count("(") is not tokens.count(")"):
+    if tokens.count("(") != tokens.count(")"):
         return True
     return False
 
@@ -88,16 +88,16 @@ def read_file(file_path: Path) -> ParsedData:
         line = remove_whitespace(line)
         if not line:
             continue
-        if "=>" in line:
-            left, right = line.split("=>", 1)
-            rule = Rule(left=Side(tokenize_expression(left, parsed), value=None, checked=False), right=Side(tokenize_expression(right, parsed), value=None, checked=False))
-            parsed.rules.append(rule)
-        elif "<=>" in line:
+        if "<=>" in line:
             left, right = line.split("<=>", 1)
             rule = Rule(left=Side(tokenize_expression(left, parsed), value=None, checked=False), right=Side(tokenize_expression(right, parsed), value=None, checked=False))
             reversedRule = Rule(left=rule.right, right=rule.left)
             parsed.rules.append(rule)
             parsed.rules.append(reversedRule)
+        elif "=>" in line:
+            left, right = line.split("=>", 1)
+            rule = Rule(left=Side(tokenize_expression(left, parsed), value=None, checked=False), right=Side(tokenize_expression(right, parsed), value=None, checked=False))
+            parsed.rules.append(rule)
         elif line.startswith("="):
             parse_facts(line, parsed)
         elif line.startswith("?"):
@@ -109,12 +109,14 @@ def parse_facts(tokens: str, parsed: ParsedData):
     for token in tokens[1:]:  # Skip the '=' token
         if not token.isupper() or len(token) != 1:
             raise ValueError(f"Invalid fact: {token}")
+        Letter.create(token, parsed)
         Letter.set(token, True, parsed)
 
 def parse_queries(tokens: str, parsed: ParsedData):
     for token in tokens[1:]:  # Skip the '?' token
         if not token.isupper() or len(token) != 1:
             raise ValueError(f"Invalid query: {token}")
+        Letter.create(token, parsed)
         letter = Letter.get(token, parsed)
         Letter.set(token, letter.value, parsed, queried=True)
 

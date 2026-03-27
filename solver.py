@@ -1,71 +1,220 @@
-from pathlib import Path
-from logic import xor, and_op, or_op, not_op
-from parser import Rule, Letter, Truth, read_file, ParsedData, Side
+from parser import ParsedData, Truth
 from typing import Dict, List, Optional, Set, Tuple
 
-def find_query_left_side(parsed: ParsedData, letter: Letter) -> Optional[Side]:
-    for rule in parsed.rules:
-        if letter.char in rule.right.expression and not rule.right.checked:
-            return rule.left
+Expression = Tuple
+
+
+class ExpressionParser:
+    def __init__(self, tokens: List[str]):
+        self.tokens = tokens
+        self.position = 0
+
+    def current(self) -> Optional[str]:
+        if self.position >= len(self.tokens):
+            return None
+        return self.tokens[self.position]
+
+    def consume(self, token: str) -> None:
+        if self.current() != token:
+            raise ValueError(f"Expected '{token}', found '{self.current()}'")
+        self.position += 1
+
+    def parse(self) -> Expression:
+        node = self.parse_xor()
+        if self.current() is not None:
+            raise ValueError(f"Unexpected token: {self.current()}")
+        return node
+
+    def parse_xor(self) -> Expression:
+        node = self.parse_or()
+        while self.current() == "^":
+            self.consume("^")
+            node = ("XOR", node, self.parse_or())
+        return node
+
+    def parse_or(self) -> Expression:
+        node = self.parse_and()
+        while self.current() == "|":
+            self.consume("|")
+            node = ("OR", node, self.parse_and())
+        return node
+
+    def parse_and(self) -> Expression:
+        node = self.parse_not()
+        while self.current() == "+":
+            self.consume("+")
+            node = ("AND", node, self.parse_not())
+        return node
+
+    def parse_not(self) -> Expression:
+        if self.current() == "!":
+            self.consume("!")
+            return ("NOT", self.parse_not())
+        return self.parse_primary()
+
+    def parse_primary(self) -> Expression:
+        token = self.current()
+        if token is None:
+            raise ValueError("Unexpected end of expression")
+        if token == "(":
+            self.consume("(")
+            node = self.parse_xor()
+            self.consume(")")
+            return node
+        if token.isupper():
+            self.position += 1
+            return ("VAR", token)
+        raise ValueError(f"Unexpected token in expression: {token}")
+
+
+def parse_expression(tokens: List[str]) -> Expression:
+    if not tokens:
+        raise ValueError("Empty expression")
+    return ExpressionParser(tokens).parse()
+
+
+def tri_not(value: Truth) -> Truth:
+    if value is None:
+        return None
+    return not value
+
+
+def tri_and(left: Truth, right: Truth) -> Truth:
+    if left is False or right is False:
+        return False
+    if left is True and right is True:
+        return True
     return None
 
-def operate(op: Optional[str], a: Truth, b: Truth) -> Truth:
-    if op == "+":
-        return and_op(Letter(char="", value=a, queried=False), Letter(char="", value=b, queried=False))
-    elif op == "|":
-        return or_op(Letter(char="", value=a, queried=False), Letter(char="", value=b, queried=False))
-    elif op == "^":
-        return xor(Letter(char="", value=a, queried=False), Letter(char="", value=b, queried=False))
-    else:
-        raise ValueError(f"Invalid operator: {op}")
 
-def solve_side(parsed: ParsedData, side: Side) -> Optional[Truth]:
-    a: Optional[Tuple[Truth, bool]] = None, False
-    b: Optional[Tuple[Truth, bool]] = None, False
-    op: Optional[str] = None
-    for token in side.expression:
-        if token.isupper():
-            if a[1] is True and op is None:
-                raise ValueError(f"Invalid expression: {side.expression}")
-            letter = Letter.get(token, parsed)
-            if a[1] is False:
-                a = letter.value, True
-            else:
-                b = letter.value, True
-                result: Optional[Truth] = operate(op, a[0], b[0])
-                a = result, True
-                b = None, False
-                op = None
-        elif not token.isupper():
-            if a[1] is False:
-                raise ValueError(f"Invalid expression: {side.expression}")
-            op = token
-            continue
+def tri_or(left: Truth, right: Truth) -> Truth:
+    if left is True or right is True:
+        return True
+    if left is False and right is False:
+        return False
+    return None
+
+
+def tri_xor(left: Truth, right: Truth) -> Truth:
+    if left is None or right is None:
+        return None
+    return left != right
+
+
+def extract_entailed_literals(expr: Expression) -> Set[Tuple[str, bool]]:
+    node_type = expr[0]
+    if node_type == "VAR":
+        return {(expr[1], True)}
+    if node_type == "NOT" and expr[1][0] == "VAR":
+        return {(expr[1][1], False)}
+    if node_type == "AND":
+        return extract_entailed_literals(expr[1]) | extract_entailed_literals(expr[2])
+    return set()
+
+
+class BackwardChainer:
+    def __init__(self, parsed: ParsedData):
+        self.parsed = parsed
+        self.targets: Dict[Tuple[str, bool], List[Expression]] = {}
+        self.memo_status: Dict[str, Truth] = {}
+        self.memo_proof: Dict[Tuple[str, bool], bool] = {}
+        self.proven_true_facts: Set[str] = {
+            char for char, letter in parsed.letters_by_char.items() if letter.value is True
+        }
+        self.proven_false_facts: Set[str] = {
+            char for char, letter in parsed.letters_by_char.items() if letter.value is False
+        }
+
+        for rule in parsed.rules:
+            left_expr = parse_expression(rule.left.expression)
+            right_expr = parse_expression(rule.right.expression)
+            for literal in extract_entailed_literals(right_expr):
+                self.targets.setdefault(literal, []).append(left_expr)
+
+    def evaluate_expression(self, expr: Expression, stack: Set[Tuple[str, bool]]) -> Truth:
+        node_type = expr[0]
+        if node_type == "VAR":
+            return self.get_symbol_status(expr[1], stack)
+        if node_type == "NOT":
+            return tri_not(self.evaluate_expression(expr[1], stack))
+        if node_type == "AND":
+            left = self.evaluate_expression(expr[1], stack)
+            right = self.evaluate_expression(expr[2], stack)
+            return tri_and(left, right)
+        if node_type == "OR":
+            left = self.evaluate_expression(expr[1], stack)
+            right = self.evaluate_expression(expr[2], stack)
+            return tri_or(left, right)
+        if node_type == "XOR":
+            left = self.evaluate_expression(expr[1], stack)
+            right = self.evaluate_expression(expr[2], stack)
+            return tri_xor(left, right)
+        raise ValueError(f"Unknown expression node type: {node_type}")
+
+    def prove_literal(self, symbol: str, desired_truth: bool, stack: Set[Tuple[str, bool]]) -> bool:
+        key = (symbol, desired_truth)
+        if key in self.memo_proof:
+            return self.memo_proof[key]
+        if key in stack:
+            return False
+
+        if desired_truth and symbol in self.proven_true_facts:
+            self.memo_proof[key] = True
+            return True
+        if not desired_truth and symbol in self.proven_false_facts:
+            self.memo_proof[key] = True
+            return True
+
+        stack.add(key)
+        proven = False
+        for left_expr in self.targets.get(key, []):
+            if self.evaluate_expression(left_expr, stack) is True:
+                proven = True
+                break
+        stack.remove(key)
+
+        self.memo_proof[key] = proven
+        return proven
+
+    def get_symbol_status(self, symbol: str, stack: Optional[Set[Tuple[str, bool]]] = None) -> Truth:
+        if symbol in self.memo_status:
+            return self.memo_status[symbol]
+
+        local_stack = stack if stack is not None else set()
+        can_be_true = self.prove_literal(symbol, True, local_stack)
+        can_be_false = self.prove_literal(symbol, False, local_stack)
+
+        if can_be_true and can_be_false:
+            status = None
+        elif can_be_true:
+            status = True
+        elif can_be_false:
+            status = False
         else:
-            raise ValueError(f"Invalid token in expression: {token}")
-    return a[0]
+            status = None
+
+        self.memo_status[symbol] = status
+        return status
+
+
+def format_truth(value: Truth) -> str:
+    if value is True:
+        return "TRUE"
+    if value is False:
+        return "FALSE"
+    return "UNDETERMINED"
+
 
 def solve(parsed: ParsedData) -> Dict[str, Truth]:
-    for rule in parsed.rules:
-        if rule.left.value is not None:
-            continue
-        result = solve_side(parsed, rule.left)
-        rule.right.value = result
-        rule.right.checked = True
-        
-        if (len(rule.right.expression) == 1 and rule.right.expression[0].isupper()):
-            letter = Letter.set(rule.right.expression[0], value=result, parsed=parsed)
-            print(f"Set {letter.char} to {letter.value} based on rule: {rule.left.expression} => {rule.right.expression}")
-        elif (len(rule.right.expression) == 1 and not rule.right.expression[0].isupper()):
-            raise ValueError(f"Invalid right side expression: {rule.right.expression}")
-        if result is not None:
-            rule.left.value = result
-            rule.left.checked = True
-    
-    # for rule in parsed.rules:
-    #     print(f"{rule.left.expression} = {rule.left.value} (checked: {rule.left.checked}) => {rule.right.expression} = {rule.right.value} (checked: {rule.right.checked})")
+    chainer = BackwardChainer(parsed)
+    results: Dict[str, Truth] = {}
 
-    print("Final letter values:")
-    for char, letter in parsed.letters_by_char.items():
-        print(f"{char}: {letter.value}")
-    return {}
+    queried_letters = sorted(
+        char for char, letter in parsed.letters_by_char.items() if letter.queried
+    )
+    for char in queried_letters:
+        value = chainer.get_symbol_status(char)
+        results[char] = value
+        print(f"{char}: {format_truth(value)}")
+
+    return results
