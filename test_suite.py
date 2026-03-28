@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from parser import Truth, read_file
-from solver import solve
+from solver import solve, ContradictionError
 
 
 @dataclass(frozen=True)
@@ -17,6 +17,7 @@ class TestCase:
     name: str
     kb: str
     expected: Dict[str, Truth]
+    expect_error: Optional[type] = None
 
 
 def truth_to_label(value: Truth) -> str:
@@ -40,7 +41,7 @@ def colorize(text: str, code: str) -> str:
     return f"{code}{text}{Color.RESET}"
 
 
-def run_case(case: TestCase) -> Dict[str, Truth]:
+def run_case(case: TestCase) -> tuple[Optional[Dict[str, Truth]], Optional[Exception]]:
     with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as handle:
         handle.write(case.kb.strip() + "\n")
         temp_path = Path(handle.name)
@@ -48,14 +49,30 @@ def run_case(case: TestCase) -> Dict[str, Truth]:
         parsed = read_file(temp_path)
         with redirect_stdout(io.StringIO()):
             actual = solve(parsed)
-        return actual
+        return actual, None
+    except Exception as exc:
+        return None, exc
     finally:
         temp_path.unlink(missing_ok=True)
 
 
 def evaluate_case(case: TestCase) -> tuple[bool, List[tuple[str, Truth, Truth]]]:
-    actual = run_case(case)
+    actual, error = run_case(case)
     details: List[tuple[str, Truth, Truth]] = []
+
+    if case.expect_error is not None:
+        if error is not None and isinstance(error, case.expect_error):
+            details.append(("(error)", f"{case.expect_error.__name__}", f"{type(error).__name__}"))
+            return True, details
+        else:
+            got = type(error).__name__ if error else "no error"
+            details.append(("(error)", f"{case.expect_error.__name__}", got))
+            return False, details
+
+    if error is not None:
+        details.append(("(error)", "no error", type(error).__name__))
+        return False, details
+
     passed = True
     for query in sorted(case.expected.keys()):
         expected_value = case.expected[query]
@@ -75,15 +92,20 @@ def print_case_result(case: TestCase, passed: bool, details: List[tuple[str, Tru
     title_color = Color.GREEN if passed else Color.RED
     status_text = "PASS" if passed else "FAIL"
     print(colorize(f"[{status_text}] {case.name}", Color.BOLD + title_color))
-    print(f"{'Query':<8}{'Expected':<16}{'Actual':<16}{'Result':<8}")
+    print(f"{'Query':<12}{'Expected':<24}{'Actual':<24}{'Result':<8}")
     for query, expected, actual in details:
-        ok = expected == actual
+        if case.expect_error is not None:
+            ok = passed
+        else:
+            ok = expected == actual
         result = "OK" if ok else "MISMATCH"
         result_color = Color.GREEN if ok else Color.RED
+        expected_label = truth_to_label(expected) if isinstance(expected, (bool, type(None))) else str(expected)
+        actual_label = truth_to_label(actual) if isinstance(actual, (bool, type(None))) else str(actual)
         print(
-            f"{query:<8}"
-            f"{truth_to_label(expected):<16}"
-            f"{truth_to_label(actual):<16}"
+            f"{query:<12}"
+            f"{expected_label:<24}"
+            f"{actual_label:<24}"
             f"{colorize(result, result_color):<8}"
         )
     print()
@@ -209,7 +231,8 @@ def build_cases() -> List[TestCase]:
             =ABG
             ?GVX
             """,
-            expected={"G": True, "V": False, "X": False},
+            expected={},
+            expect_error=ContradictionError,
         ),
         TestCase(
             name="Parentheses on LHS with grouped OR",
@@ -246,6 +269,61 @@ def build_cases() -> List[TestCase]:
             ?XY
             """,
             expected={"X": None, "Y": None},
+        ),
+        # --- Contradiction cases ---
+        TestCase(
+            name="Direct contradiction: rule proves B true and false",
+            kb="""
+            A => B
+            A => !B
+            =A
+            ?B
+            """,
+            expected={},
+            expect_error=ContradictionError,
+        ),
+        TestCase(
+            name="Contradiction via initial fact and negating rule",
+            kb="""
+            A => !A
+            =A
+            ?A
+            """,
+            expected={},
+            expect_error=ContradictionError,
+        ),
+        TestCase(
+            name="Contradiction through chain",
+            kb="""
+            A => B
+            B => C
+            B => !C
+            =A
+            ?C
+            """,
+            expected={},
+            expect_error=ContradictionError,
+        ),
+        TestCase(
+            name="Contradiction: AND conjunction on both sides",
+            kb="""
+            A + B => C
+            A + B => !C
+            =AB
+            ?C
+            """,
+            expected={},
+            expect_error=ContradictionError,
+        ),
+        TestCase(
+            name="No contradiction when contradicting rule does not fire",
+            kb="""
+            A => B
+            C => !B
+            =A
+            ?B
+            """,
+            expected={"B": True},
         ),
     ]
 

@@ -5,6 +5,10 @@ from typing import Dict, List, Optional, Set, Tuple
 Expression = Tuple
 
 
+class ContradictionError(Exception):
+    pass
+
+
 class ExpressionParser:
     def __init__(self, tokens: List[str]):
         self.tokens = tokens
@@ -233,7 +237,9 @@ class BackwardChainer:
         has_ambiguity = self.has_active_ambiguity(symbol, local_stack)
 
         if can_be_true and can_be_false:
-            status = None
+            raise ContradictionError(
+                f"Contradiction detected: '{symbol}' can be proven both TRUE and FALSE"
+            )
         elif can_be_true:
             status = True
         elif has_ambiguity:
