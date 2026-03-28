@@ -112,24 +112,53 @@ def extract_entailed_literals(expr: Expression) -> Set[Tuple[str, bool]]:
     return set()
 
 
+def extract_symbols(expr: Expression) -> Set[str]:
+    node_type = expr[0]
+    if node_type == "VAR":
+        return {expr[1]}
+    if node_type == "NOT":
+        return extract_symbols(expr[1])
+    if node_type in {"AND", "OR", "XOR"}:
+        return extract_symbols(expr[1]) | extract_symbols(expr[2])
+    return set()
+
+
+def extract_ambiguous_rhs_symbols(expr: Expression) -> Set[str]:
+    node_type = expr[0]
+    if node_type in {"OR", "XOR"}:
+        return extract_symbols(expr)
+    if node_type == "AND":
+        return extract_ambiguous_rhs_symbols(expr[1]) | extract_ambiguous_rhs_symbols(expr[2])
+    if node_type == "NOT":
+        return extract_ambiguous_rhs_symbols(expr[1])
+    return set()
+
+
 class BackwardChainer:
     def __init__(self, parsed: ParsedData):
         self.parsed = parsed
         self.targets: Dict[Tuple[str, bool], List[Expression]] = {}
+        self.ambiguous_targets: Dict[str, List[Expression]] = {}
         self.memo_status: Dict[str, Truth] = {}
         self.memo_proof: Dict[Tuple[str, bool], bool] = {}
         self.proven_true_facts: Set[str] = {
             char for char, letter in parsed.letters_by_char.items() if letter.value is True
         }
-        self.proven_false_facts: Set[str] = {
-            char for char, letter in parsed.letters_by_char.items() if letter.value is False
-        }
+        self.proven_false_facts: Set[str] = set()
 
         for rule in parsed.rules:
             left_expr = parse_expression(rule.left.expression)
             right_expr = parse_expression(rule.right.expression)
             for literal in extract_entailed_literals(right_expr):
                 self.targets.setdefault(literal, []).append(left_expr)
+            for symbol in extract_ambiguous_rhs_symbols(right_expr):
+                self.ambiguous_targets.setdefault(symbol, []).append(left_expr)
+
+    def has_active_ambiguity(self, symbol: str, stack: Set[Tuple[str, bool]]) -> bool:
+        for left_expr in self.ambiguous_targets.get(symbol, []):
+            if self.evaluate_expression(left_expr, stack) is True:
+                return True
+        return False
 
     def evaluate_expression(self, expr: Expression, stack: Set[Tuple[str, bool]]) -> Truth:
         node_type = expr[0]
@@ -183,15 +212,18 @@ class BackwardChainer:
         local_stack = stack if stack is not None else set()
         can_be_true = self.prove_literal(symbol, True, local_stack)
         can_be_false = self.prove_literal(symbol, False, local_stack)
+        has_ambiguity = self.has_active_ambiguity(symbol, local_stack)
 
         if can_be_true and can_be_false:
             status = None
         elif can_be_true:
             status = True
+        elif has_ambiguity:
+            status = None
         elif can_be_false:
             status = False
         else:
-            status = None
+            status = False
 
         self.memo_status[symbol] = status
         return status
