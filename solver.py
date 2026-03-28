@@ -1,4 +1,5 @@
 from parser import ParsedData, Truth
+from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
 Expression = Tuple
@@ -160,6 +161,23 @@ class BackwardChainer:
                 return True
         return False
 
+    def expression_to_str(self, expr: Expression) -> str:
+        node_type = expr[0]
+        if node_type == "VAR":
+            return expr[1]
+        if node_type == "NOT":
+            child = self.expression_to_str(expr[1])
+            if expr[1][0] == "VAR":
+                return f"!{child}"
+            return f"!({child})"
+        if node_type == "AND":
+            return f"({self.expression_to_str(expr[1])} + {self.expression_to_str(expr[2])})"
+        if node_type == "OR":
+            return f"({self.expression_to_str(expr[1])} | {self.expression_to_str(expr[2])})"
+        if node_type == "XOR":
+            return f"({self.expression_to_str(expr[1])} ^ {self.expression_to_str(expr[2])})"
+        return "?"
+
     def evaluate_expression(self, expr: Expression, stack: Set[Tuple[str, bool]]) -> Truth:
         node_type = expr[0]
         if node_type == "VAR":
@@ -228,6 +246,85 @@ class BackwardChainer:
         self.memo_status[symbol] = status
         return status
 
+    def build_query_explanation(self, symbol: str) -> str:
+        lines: List[str] = []
+        lines.append(f"Query: {symbol}")
+        lines.append("-" * 72)
+
+        final_status = self.get_symbol_status(symbol)
+        if symbol in self.proven_true_facts:
+            state: Truth = True
+            lines.append(f"Initial state: {symbol} = {format_truth(state)} (initial fact)")
+            lines.append("")
+            lines.append("Symbol is already proven by initial facts; no rule testing is required.")
+            lines.append(f"Final state: {symbol} = {format_truth(final_status)}")
+            return "\n".join(lines)
+
+        state = False
+        lines.append(f"Initial state: {symbol} = {format_truth(state)} (default)")
+
+        stack: Set[Tuple[str, bool]] = set()
+        true_candidates = self.targets.get((symbol, True), [])
+        if true_candidates:
+            lines.append("")
+            lines.append("Trying rules that could prove TRUE:")
+            for index, left_expr in enumerate(true_candidates, start=1):
+                left_result = self.evaluate_expression(left_expr, stack)
+                lines.append(f"  [T{index}] Test: {self.expression_to_str(left_expr)} => {symbol}")
+                lines.append(f"       Left result: {format_truth(left_result)}")
+                if left_result is True:
+                    state = True
+                    lines.append(f"       State after rule: {symbol} = {format_truth(state)} (PROVEN)")
+                    lines.append("")
+                    lines.append(f"Final state: {symbol} = {format_truth(final_status)}")
+                    return "\n".join(lines)
+                lines.append(f"       State after rule: {symbol} = {format_truth(state)}")
+        else:
+            lines.append("")
+            lines.append("No rules can directly prove this symbol as TRUE.")
+
+        false_candidates = self.targets.get((symbol, False), [])
+        if false_candidates:
+            lines.append("")
+            lines.append("Trying rules that could prove FALSE:")
+            for index, left_expr in enumerate(false_candidates, start=1):
+                left_result = self.evaluate_expression(left_expr, stack)
+                lines.append(f"  [F{index}] Test: {self.expression_to_str(left_expr)} => !{symbol}")
+                lines.append(f"       Left result: {format_truth(left_result)}")
+                if left_result is True:
+                    state = False
+                    lines.append(f"       State after rule: {symbol} = {format_truth(state)} (PROVEN)")
+                    lines.append("")
+                    lines.append(f"Final state: {symbol} = {format_truth(final_status)}")
+                    return "\n".join(lines)
+                lines.append(f"       State after rule: {symbol} = {format_truth(state)}")
+
+        ambiguity_candidates = self.ambiguous_targets.get(symbol, [])
+        if ambiguity_candidates:
+            lines.append("")
+            lines.append("Checking OR/XOR ambiguity rules involving this symbol:")
+            ambiguity_active = False
+            for index, left_expr in enumerate(ambiguity_candidates, start=1):
+                left_result = self.evaluate_expression(left_expr, stack)
+                lines.append(f"  [A{index}] Test ambiguity source: {self.expression_to_str(left_expr)} => (... {symbol} ...)")
+                lines.append(f"       Left result: {format_truth(left_result)}")
+                if left_result is True:
+                    ambiguity_active = True
+                    state = None
+                    lines.append(f"       State after rule: {symbol} = {format_truth(state)}")
+                    break
+                lines.append(f"       State after rule: {symbol} = {format_truth(state)}")
+
+            if ambiguity_active:
+                lines.append("")
+                lines.append(f"Final state: {symbol} = {format_truth(final_status)}")
+                return "\n".join(lines)
+
+        lines.append("")
+        lines.append("No testable rule proved a different value.")
+        lines.append(f"Final state: {symbol} = {format_truth(final_status)}")
+        return "\n".join(lines)
+
 
 def format_truth(value: Truth) -> str:
     if value is True:
@@ -237,7 +334,7 @@ def format_truth(value: Truth) -> str:
     return "UNDETERMINED"
 
 
-def solve(parsed: ParsedData) -> Dict[str, Truth]:
+def solve(parsed: ParsedData, explanation_file: Optional[Path] = None) -> Dict[str, Truth]:
     chainer = BackwardChainer(parsed)
     results: Dict[str, Truth] = {}
 
@@ -248,5 +345,16 @@ def solve(parsed: ParsedData) -> Dict[str, Truth]:
         value = chainer.get_symbol_status(char)
         results[char] = value
         print(f"{char}: {format_truth(value)}")
+
+    if explanation_file is not None:
+        blocks: List[str] = []
+        blocks.append("EXPERT SYSTEM EXPLANATION REPORT")
+        blocks.append("=" * 72)
+        blocks.append("")
+        for index, char in enumerate(queried_letters, start=1):
+            blocks.append(f"[{index}] {char}")
+            blocks.append(chainer.build_query_explanation(char))
+            blocks.append("")
+        explanation_file.write_text("\n".join(blocks).rstrip() + "\n", encoding="utf-8")
 
     return results

@@ -1,0 +1,48 @@
+EXPERT SYSTEM EXPLANATION REPORT
+========================================================================
+
+[1] G
+Query: G
+------------------------------------------------------------------------
+Initial state: G = TRUE (initial fact)
+
+Symbol is already proven by initial facts; no rule testing is required.
+Final state: G = TRUE
+
+[2] V
+Query: V
+------------------------------------------------------------------------
+Initial state: V = FALSE (default)
+
+No rules can directly prove this symbol as TRUE.
+
+Trying rules that could prove FALSE:
+  [F1] Test: (E + F) => !V
+       Left result: FALSE
+       State after rule: V = FALSE
+
+Checking OR/XOR ambiguity rules involving this symbol:
+  [A1] Test ambiguity source: (C | D) => (... V ...)
+       Left result: UNDETERMINED
+       State after rule: V = FALSE
+
+No testable rule proved a different value.
+Final state: V = FALSE
+
+[3] X
+Query: X
+------------------------------------------------------------------------
+Initial state: X = FALSE (default)
+
+Trying rules that could prove TRUE:
+  [T1] Test: (V ^ W) => X
+       Left result: FALSE
+       State after rule: X = FALSE
+
+Checking OR/XOR ambiguity rules involving this symbol:
+  [A1] Test ambiguity source: (C | D) => (... X ...)
+       Left result: UNDETERMINED
+       State after rule: X = FALSE
+
+No testable rule proved a different value.
+Final state: X = FALSE
